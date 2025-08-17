@@ -1,0 +1,124 @@
+{
+  "name": "GSC Click-Win → Google Sheets (no Slack)",
+  "nodes": [
+    {
+      "parameters": {
+        "triggerTimes": { "item": [ { "hour": 8, "minute": 30 } ] }
+      },
+      "id": "Cron",
+      "name": "Cron (08:30 IST daily)",
+      "type": "n8n-nodes-base.cron",
+      "typeVersion": 1,
+      "position": [260, 260]
+    },
+    {
+      "parameters": {
+        "keepOnlySet": true,
+        "values": {
+          "string": [
+            { "name": "siteUrl", "value": "sc-domain:YOUR_GSC_PROPERTY" }
+          ],
+          "number": [
+            { "name": "lookbackDays", "value": 7 },
+            { "name": "minImpressions", "value": 200 },
+            { "name": "maxCTR", "value": 0.025 },
+            { "name": "maxPosition", "value": 8 }
+          ]
+        }
+      },
+      "id": "SetConfig",
+      "name": "Set Config",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [520, 260]
+    },
+    {
+      "parameters": {
+        "authentication": "oAuth2",
+        "url": "={{`https://searchconsole.googleapis.com/webmasters/v3/sites/` + $json.siteUrl + `/searchAnalytics/query`}}",
+        "method": "POST",
+        "options": { "useQueryString": false },
+        "sendBody": true,
+        "jsonParameters": true,
+        "bodyParametersJson": "={{ JSON.stringify({ startDate: $now.minus({ days: $json.lookbackDays }).format('YYYY-MM-DD'), endDate: $now.minus({ days: 1 }).format('YYYY-MM-DD'), dimensions: [\"query\",\"page\",\"device\"], rowLimit: 25000 }) }}"
+      },
+      "id": "GSC_Query",
+      "name": "HTTP → GSC Search Analytics",
+      "type": "n8n-nodes-base.httpRequest",
+      "typeVersion": 4,
+      "position": [800, 260],
+      "notes": "Authorize with Google OAuth2 (scope: webmasters.readonly)",
+      "notesInFlow": true
+    },
+    {
+      "parameters": { "mode": "mergeByPosition" },
+      "id": "Merge",
+      "name": "Merge (Response + Config)",
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 2,
+      "position": [1040, 260]
+    },
+    {
+      "parameters": {
+        "functionCode": "const cfg={minImpr:$json.minImpressions??200,maxCTR:$json.maxCTR??0.025,maxPos:$json.maxPosition??8,lookbackDays:$json.lookbackDays??7};const end=new Date();end.setDate(end.getDate()-1);const start=new Date();start.setDate(start.getDate()-cfg.lookbackDays);const pad=n=>String(n).padStart(2,'0');const fmt=d=>`${d.getFullYear()}-${pad(d.getMonth()+1)}-${pad(d.getDate())}`;const dateRange=`${fmt(start)} → ${fmt(end)}`;const rows=$json.rows||[];const out=[];for(const r of rows){const clicks=r.clicks||0;const impressions=r.impressions||0;const position=r.position??99;const ctr=impressions?(clicks/impressions):0;const [query,page,device]=r.keys||[null,null,null];if(impressions>=cfg.minImpr&&ctr<=cfg.maxCTR&&position<=cfg.maxPos){const score=Math.round(impressions*(cfg.maxPos+1-position));out.push({json:{date_range:dateRange,query,page,device,impressions,clicks,ctr:Number(ctr.toFixed(4)),position:Number(Number(position).toFixed(2)),priority_score:score}})}}out.sort((a,b)=>(b.json.priority_score-a.json.priority_score)||(b.json.impressions-a.json.impressions));return out;"
+      },
+      "id": "FilterScore",
+      "name": "Function → Filter & Score",
+      "type": "n8n-nodes-base.function",
+      "typeVersion": 2,
+      "position": [1280, 260]
+    },
+    {
+      "parameters": {
+        "fields": {
+          "string": [
+            { "name": "Date Range", "value": "={{$json[\"date_range\"]}}" },
+            { "name": "Query", "value": "={{$json[\"query\"]}}" },
+            { "name": "Page", "value": "={{$json[\"page\"]}}" },
+            { "name": "Device", "value": "={{$json[\"device\"]}}" }
+          ],
+          "number": [
+            { "name": "Impressions", "value": "={{$json[\"impressions\"]}}" },
+            { "name": "Clicks", "value": "={{$json[\"clicks\"]}}" },
+            { "name": "CTR", "value": "={{$json[\"ctr\"]}}" },
+            { "name": "Position", "value": "={{$json[\"position\"]}}" },
+            { "name": "Priority", "value": "={{$json[\"priority_score\"]}}" }
+          ]
+        },
+        "options": { "includeOtherFields": false }
+      },
+      "id": "MapForSheet",
+      "name": "Set → Map to Sheet Columns",
+      "type": "n8n-nodes-base.set",
+      "typeVersion": 2,
+      "position": [1280, 450]
+    },
+    {
+      "parameters": {
+        "operation": "appendOrUpdate",
+        "documentId": "YOUR_SPREADSHEET_ID",
+        "sheetName": "YOUR_SHEET_NAME",
+        "columns": "Date Range, Query, Page, Device, Impressions, Clicks, CTR, Position, Priority",
+        "key": "Query, Page",
+        "options": { "valueInputMode": "RAW" },
+        "additionalFields": {}
+      },
+      "id": "GoogleSheets",
+      "name": "Google Sheets → Append/Update",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 6,
+      "position": [1540, 260],
+      "credentials": {}
+    }
+  ],
+  "connections": {
+    "Cron (08:30 IST daily)": { "main": [ [ { "node": "Set Config", "type": "main", "index": 0 } ] ] },
+    "Set Config": { "main": [ [ { "node": "HTTP → GSC Search Analytics", "type": "main", "index": 0 } ], [ { "node": "Merge (Response + Config)", "type": "main", "index": 1 } ] ] },
+    "HTTP → GSC Search Analytics": { "main": [ [ { "node": "Merge (Response + Config)", "type": "main", "index": 0 } ] ] },
+    "Merge (Response + Config)": { "main": [ [ { "node": "Function → Filter & Score", "type": "main", "index": 0 }, { "node": "Set → Map to Sheet Columns", "type": "main", "index": 0 } ] ] },
+    "Function → Filter & Score": { "main": [ [ { "node": "Set → Map to Sheet Columns", "type": "main", "index": 0 } ] ] },
+    "Set → Map to Sheet Columns": { "main": [ [ { "node": "Google Sheets → Append/Update", "type": "main", "index": 0 } ] ] }
+  },
+  "meta": { "templateCredsSetup": [ "HTTP → GSC Search Analytics: Google OAuth2 (scope webmasters.readonly)", "Google Sheets → Append/Update: Google Sheets credentials" ] },
+  "active": false
+}
