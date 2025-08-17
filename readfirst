@@ -1,0 +1,61 @@
+Enable Google APIs (once)
+
+1. Go to Google Cloud Console → create/select a project
+2. APIs & Services → Library → enable:
+2.1. Search Console API
+2.2 Google Sheets API (for writing to Sheets)
+3. APIs & Services → Credentials → Create Credentials → OAuth client ID
+3.1 Application type: Web application
+3.2 Authorized redirect URI (exactly):  http://localhost:5678/rest/oauth2-credential/callback
+3.3 Save the Client ID and Client secret
+
+Configure credentials in n8n
+Open http://localhost:5678
+
+1. OAuth2 for Google (used by HTTP → GSC node)
+1.1. Credentials → New → OAuth2 API
+1.11. Auth URL: https://accounts.google.com/o/oauth2/v2/auth
+1.12. Token URL: https://oauth2.googleapis.com/token
+1.2. Scopes (space separated):
+1.21. https://www.googleapis.com/auth/webmasters.readonly
+1.22. https://www.googleapis.com/auth/spreadsheets
+1.3. Redirect URL will be shown (must match the URI you added): http://localhost:5678/rest/oauth2-credential/callback
+1.4. Click Connect OAuth2 and finish Google consent
+
+2. Google Sheets credentials
+2.1. Credentials → New → Google Sheets → Connect your Google account
+
+3. Import & configure the workflow
+3.1. Workflows → Import from file → select workflows/gsc_clickwin_workflow.json
+3.2. Open Set Config node:
+   3.2.1. siteUrl must match your GSC property:
+                       a. Domain property → sc-domain:example.com
+                       b. URL prefix property → e.g., https://www.example.com/
+    3.2.2. Optional thresholds:
+                       a. lookbackDays (default 7)
+                       b. minImpressions (default 200)
+                       c. maxCTR (0.025 = 2.5%)
+                       d. maxPosition (8)
+
+    3.2.3. Open Google Sheets → Append/Update node:
+                       a. documentId: spreadsheet ID from URL
+                       b. sheetName: tab name (create it)
+                       
+    3.2.4. Click Execute Workflow to test
+    3.2.5. Toggle Active (top-right) to enable daily Cron at 08:30 IST
+
+Troubleshooting
+                       
+a. redirect_uri_mismatch: The redirect URI in Google Cloud must be
+http://localhost:5678/rest/oauth2-credential/callback
+
+b. 403 insufficientPermissions: Ensure scopes include webmasters.readonly and spreadsheets; reconnect OAuth
+
+c. Empty results: GSC can lag; date window is yesterday back N days; ensure the property actually has data
+
+d. Wrong siteUrl: Use sc-domain: for domain properties; full origin for URL prefix properties
+
+e. Sheets not updating: Node uses Query, Page as composite key. If you want pure append, change operation to Append
+
+About: “This repo spins up n8n locally via Docker, connects to the free Google Search Console API, and every morning finds page-1, high-impression queries with low CTR. It scores them and logs to Google Sheets so we know exactly which titles/descriptions to fix for instant traffic lifts.”
+                       
